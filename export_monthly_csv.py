@@ -10,6 +10,11 @@ from pathlib import Path
 import pandas as pd
 
 
+PIPET_SCALE_OVERRIDES: dict[str, float] = {
+    "USATECHIDXUSD": 0.1,
+}
+
+
 def _month_start(dt: datetime) -> datetime:
     return dt.astimezone(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -118,6 +123,7 @@ def main() -> int:
             symbol=symbol,
             start=current,
             end=month_end,
+            pipet_scale=PIPET_SCALE_OVERRIDES.get(symbol),
             strict=False,
             show_progress=bool(args.show_progress),
         )

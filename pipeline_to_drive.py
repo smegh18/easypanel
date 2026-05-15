@@ -14,6 +14,11 @@ from download_full_ranges import _download_window_with_retries, _import_tick_vau
 from export_monthly_csv import _build_export_frame, _month_start, _next_month
 
 
+PIPET_SCALE_OVERRIDES: dict[str, float] = {
+    "USATECHIDXUSD": 0.1,
+}
+
+
 def _resolve_symbol_and_start(raw_symbol: str, explicit_start: datetime | None) -> tuple[str, datetime]:
     symbol = raw_symbol.strip().upper()
     if symbol in {"NAS100", "NASDAQ100", "US100"}:
@@ -229,6 +234,7 @@ def main() -> int:
                 symbol=symbol,
                 start=current,
                 end=month_end,
+                pipet_scale=PIPET_SCALE_OVERRIDES.get(symbol),
                 strict=False,
                 show_progress=bool(args.show_progress),
             )
