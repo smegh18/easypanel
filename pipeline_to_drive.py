@@ -68,19 +68,20 @@ def _configure_rclone_remote(remote: str, folder_value: str | None) -> str:
     return f"{remote_name}:"
 
 
-def _upload_csv_to_drive(local_csv: Path, remote: str, remote_subdir: str | None) -> None:
+def _upload_file_to_drive(local_file: Path, remote: str, remote_subdir: str | None, remote_name: str | None = None) -> None:
     destination = remote
     clean_subdir = (remote_subdir or "").strip("/")
+    filename = remote_name or local_file.name
     if clean_subdir:
-        destination = f"{destination}{clean_subdir}/{local_csv.name}"
+        destination = f"{destination}{clean_subdir}/{filename}"
     else:
-        destination = f"{destination}{local_csv.name}"
+        destination = f"{destination}{filename}"
 
     subprocess.run(
         [
             "rclone",
             "copyto",
-            str(local_csv),
+            str(local_file),
             destination,
             "--retries",
             "3",
@@ -90,6 +91,39 @@ def _upload_csv_to_drive(local_csv: Path, remote: str, remote_subdir: str | None
         ],
         check=True,
     )
+
+
+def _upload_raw_month_to_drive(
+    symbol: str,
+    month_start: datetime,
+    month_end: datetime,
+    tick_vault_dir: Path,
+    remote: str,
+    raw_subdir: str | None,
+) -> int:
+    os.environ["TICK_VAULT_BASE_DIRECTORY"] = str(tick_vault_dir)
+
+    from tick_vault.metadata import MetadataDB  # noqa: PLC0415
+
+    uploads = 0
+    downloads_base = tick_vault_dir / "downloads"
+    symbol_base = downloads_base / symbol
+    clean_subdir = (raw_subdir or "").strip("/")
+
+    with MetadataDB() as db:
+        chunks = db.get_available_chunks(symbol, month_start, month_end)
+
+    for chunk in chunks:
+        local_path = chunk.path(base=downloads_base)
+        if not local_path.exists():
+            continue
+
+        relative_path = local_path.relative_to(symbol_base).as_posix()
+        remote_path = f"{clean_subdir}/{relative_path}" if clean_subdir else relative_path
+        _upload_file_to_drive(local_path, remote, None, remote_name=remote_path)
+        uploads += 1
+
+    return uploads
 
 
 def _purge_raw_month(symbol: str, month_start: datetime, month_end: datetime, tick_vault_dir: Path) -> None:
@@ -181,7 +215,17 @@ def main() -> int:
     parser.add_argument(
         "--drive-subdir",
         default=None,
-        help="Optional subdirectory inside the Drive folder. Defaults to the resolved symbol name.",
+        help="Legacy common subdirectory inside the Drive folder. If raw/csv subdirs are not set, both default from this.",
+    )
+    parser.add_argument(
+        "--drive-raw-subdir",
+        default=None,
+        help="Drive subdirectory for raw .bi5 files. Defaults to raw/<SYMBOL>.",
+    )
+    parser.add_argument(
+        "--drive-csv-subdir",
+        default=None,
+        help="Drive subdirectory for monthly CSV files. Defaults to csv/<SYMBOL>.",
     )
     args = parser.parse_args()
 
@@ -192,7 +236,20 @@ def main() -> int:
 
     symbol, start = _resolve_symbol_and_start(args.symbol, explicit_start)
     drive_remote = _configure_rclone_remote(args.drive_remote, args.drive_folder)
-    drive_subdir = args.drive_subdir or symbol
+    base_drive_subdir = (args.drive_subdir or "").strip("/")
+    if args.drive_raw_subdir:
+        drive_raw_subdir = args.drive_raw_subdir.strip("/")
+    elif base_drive_subdir:
+        drive_raw_subdir = f"{base_drive_subdir}/raw/{symbol}"
+    else:
+        drive_raw_subdir = f"raw/{symbol}"
+
+    if args.drive_csv_subdir:
+        drive_csv_subdir = args.drive_csv_subdir.strip("/")
+    elif base_drive_subdir:
+        drive_csv_subdir = f"{base_drive_subdir}/csv"
+    else:
+        drive_csv_subdir = f"csv/{symbol}"
 
     download_range = _import_tick_vault(tick_vault_dir, workers=int(args.workers))
 
@@ -245,8 +302,18 @@ def main() -> int:
         else:
             print(f"Using existing CSV {csv_path}")
 
-        _upload_csv_to_drive(csv_path, drive_remote, drive_subdir)
-        print(f"Uploaded {csv_path.name} to {drive_remote}{drive_subdir}/")
+        raw_uploaded = _upload_raw_month_to_drive(
+            symbol=symbol,
+            month_start=current,
+            month_end=month_end,
+            tick_vault_dir=tick_vault_dir,
+            remote=drive_remote,
+            raw_subdir=drive_raw_subdir,
+        )
+        print(f"Uploaded {raw_uploaded} raw files for {symbol} {current.year:04d}-{current.month:02d} to {drive_remote}{drive_raw_subdir}/")
+
+        _upload_file_to_drive(csv_path, drive_remote, drive_csv_subdir)
+        print(f"Uploaded {csv_path.name} to {drive_remote}{drive_csv_subdir}/")
 
         if not args.keep_raw:
             _purge_raw_month(symbol, current, month_end, tick_vault_dir)

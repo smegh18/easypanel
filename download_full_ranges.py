@@ -8,6 +8,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+MT5_ONLY_US_STOCKS = {
+    "AAPL",
+    "AMD",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "MSFT",
+    "NVDA",
+    "TSLA",
+}
+
 
 def _parse_utc_datetime(value: str) -> datetime:
     raw = value.strip()
@@ -256,15 +267,23 @@ def main() -> int:
             return "USATECHIDXUSD"
         return s
 
+    requested_symbols = [resolve_symbol(raw) for raw in args.symbols]
+    blocked = sorted(set(requested_symbols) & MT5_ONLY_US_STOCKS)
+    if blocked:
+        blocked_text = ", ".join(blocked)
+        raise SystemExit(
+            "Dukascopy download blocked for MT5-only US stocks: "
+            f"{blocked_text}. Use IC Markets MT5 M1 broker history instead."
+        )
+
     jobs: list[Job] = []
-    for raw in args.symbols:
-        symbol = resolve_symbol(raw)
-        if symbol in {"EURUSD", "XAUUSD"}:
-            start = datetime(2006, 1, 1, tzinfo=UTC)
-        elif symbol == "USATECHIDXUSD":
+    for symbol in requested_symbols:
+        if symbol == "USATECHIDXUSD":
             start = datetime(2013, 1, 1, 5, tzinfo=UTC)
         else:
-            raise SystemExit(f"Unsupported symbol: {raw} (resolved to {symbol})")
+            # Default to 2006-01-01 for FX/metals/other symbols and let Dukascopy
+            # availability determine what actually exists.
+            start = datetime(2006, 1, 1, tzinfo=UTC)
 
         jobs.append(Job(symbol=symbol, start=start, end=end))
 
