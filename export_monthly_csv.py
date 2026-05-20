@@ -10,9 +10,25 @@ from pathlib import Path
 import pandas as pd
 
 
-PIPET_SCALE_OVERRIDES: dict[str, float] = {
-    "USATECHIDXUSD": 0.1,
-}
+def _infer_pipet_scale(symbol: str) -> float | None:
+    upper_symbol = symbol.upper()
+
+    explicit: dict[str, float] = {
+        "USATECHIDXUSD": 0.1,
+        "XAUUSD": 0.001,
+        "XAGUSD": 0.001,
+        "BTCUSD": 0.1,
+        "ETHUSD": 0.1,
+    }
+    if upper_symbol in explicit:
+        return explicit[upper_symbol]
+
+    # Generic FX handling: most non-JPY pairs use 1e-5 pipet precision,
+    # while JPY-quoted pairs use 1e-3.
+    if len(upper_symbol) == 6 and upper_symbol.isalpha():
+        return 0.001 if upper_symbol.endswith("JPY") else 0.00001
+
+    return None
 
 
 def _month_start(dt: datetime) -> datetime:
@@ -123,7 +139,7 @@ def main() -> int:
             symbol=symbol,
             start=current,
             end=month_end,
-            pipet_scale=PIPET_SCALE_OVERRIDES.get(symbol),
+            pipet_scale=_infer_pipet_scale(symbol),
             strict=False,
             show_progress=bool(args.show_progress),
         )

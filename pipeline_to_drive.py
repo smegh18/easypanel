@@ -11,12 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from download_full_ranges import _download_window_with_retries, _import_tick_vault, _parse_utc_datetime
-from export_monthly_csv import _build_export_frame, _month_start, _next_month
-
-
-PIPET_SCALE_OVERRIDES: dict[str, float] = {
-    "USATECHIDXUSD": 0.1,
-}
+from export_monthly_csv import _build_export_frame, _infer_pipet_scale, _month_start, _next_month
 
 
 def _resolve_symbol_and_start(raw_symbol: str, explicit_start: datetime | None) -> tuple[str, datetime]:
@@ -291,7 +286,7 @@ def main() -> int:
                 symbol=symbol,
                 start=current,
                 end=month_end,
-                pipet_scale=PIPET_SCALE_OVERRIDES.get(symbol),
+                pipet_scale=_infer_pipet_scale(symbol),
                 strict=False,
                 show_progress=bool(args.show_progress),
             )
